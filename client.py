@@ -17,6 +17,8 @@ from fastmcp.client.transports import StdioTransport
 from fastmcp.exceptions import ToolError
 from playwright.async_api import Error, async_playwright
 
+import vox
+
 ROOT = Path(__file__).resolve().parent
 ZONE = ZoneInfo("Asia/Beirut")
 CATEGORIES = {"find_showtimes": "Data", "select_seats": "Action",
@@ -41,7 +43,7 @@ def choose(options, prompt):
     return options[selection - 1]
 
 
-async def open_checkout(directory, result):
+def read_handoff(directory, result):
     identifier = result["handoff_id"]
     if not re.fullmatch(r"checkout-[a-zA-Z0-9_-]+", identifier):
         raise ValueError("The checkout session could not be opened.")
@@ -51,8 +53,17 @@ async def open_checkout(directory, result):
     address = urlsplit(handoff["url"])
     if address.scheme != "https" or address.netloc != "lbn.voxcinemas.com":
         raise ValueError("The checkout link must belong to VOX Lebanon.")
+    return handoff
+
+
+async def open_checkout(directory, result):
+    handoff = read_handoff(directory, result)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(channel="chrome", headless=False)
+        try:
+            browser = await playwright.chromium.launch(channel="chrome", headless=False)
+        except Error:
+            await asyncio.to_thread(vox.abandon_handoff, handoff)
+            raise ValueError("Chrome could not start. Install Google Chrome and try again.") from None
         try:
             context = await browser.new_context()
             await context.add_cookies(handoff["cookies"])
@@ -93,8 +104,18 @@ async def demo(client, directory, manual):
         print("VOX listed no matching showtimes for that date and time.")
         return 1
     show_listing(screenings)
-    show = choose(screenings, "Select a showtime number: ") if manual else screenings[0]
-    details = await call(client, "find_showtimes", **criteria, showtime_id=show["id"], party_size=party)
+    candidates = [choose(screenings, "Select a showtime number: ")] if manual else screenings[:4]
+    for show in candidates:
+        try:
+            details = await call(client, "find_showtimes", **criteria, showtime_id=show["id"],
+                                 party_size=party)
+            break
+        except ToolError:
+            if manual:
+                raise
+    else:
+        print("VOX did not offer a guest seat map for the first matching screenings.")
+        return 1
     if details.get("admission"):
         print(details["admission"])
     if manual:
@@ -128,11 +149,15 @@ async def demo(client, directory, manual):
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", nargs="?", choices=("auto", "manual", "tools", "find"), default="auto")
+    parser.add_argument("mode", nargs="?", choices=("auto", "manual", "tools", "find", "chat"), default="auto")
     parser.add_argument("--date", default=(datetime.now(ZONE).date() + timedelta(days=1)).isoformat())
     parser.add_argument("--movie", default="")
     options = parser.parse_args()
     with TemporaryDirectory(prefix="beirut-cinema-") as directory:
+        if options.mode == "chat":
+            from agent_client import chat
+
+            return await chat(directory)
         env = {**os.environ, "VOX_HANDOFF_DIR": directory}
         transport = StdioTransport(sys.executable, [str(ROOT / "server.py")], env=env)
         async with Client(transport, timeout=125) as client:
@@ -142,7 +167,10 @@ async def main():
                 return 0
             if options.mode == "find":
                 result = await call(client, "find_showtimes", day=options.date, movie=options.movie)
-                show_listing(result["screenings"])
+                if result["screenings"]:
+                    show_listing(result["screenings"])
+                else:
+                    print("VOX listed no matching showtimes.")
                 return 0
             return await demo(client, directory, options.mode == "manual")
 

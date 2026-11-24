@@ -68,7 +68,8 @@ def finish(cart, group, rating, screening):
     if not directory:
         raise ToolError("Start the included demo client to receive the VOX checkout session.")
     link, stage, total = vox.allocate(cart, group, rating)
-    payload = {"url": link, "cookies": vox.checkout_cookies(cart)}
+    payload = {"url": link, "cookies": vox.checkout_cookies(cart),
+               "abandon_url": cart.abandon_url}
     try:
         with NamedTemporaryFile(mode="w", prefix="checkout-", dir=directory,
                                 delete=False, encoding="utf-8") as handle:
@@ -105,10 +106,12 @@ def prepare_checkout(day: date, movie: str, party_size: PartySize, acknowledged_
     """Choose the earliest matching show with adjacent seats and prepare its real guest checkout."""
     options = find_showtimes(day, movie, experience)
     candidates = [show for show in options.screenings
-                  if show.starts_at.time() >= after and show.rating.casefold() == acknowledged_rating.casefold()]
+                  if show.starts_at.time() >= after]
     for show in candidates[:4]:
         try:
             with vox.guest_cart(show.id) as cart:
+                if cart.rating.casefold() != acknowledged_rating.casefold():
+                    continue
                 groups = vox.adjacent_groups(cart.rows, party_size)
                 if groups:
                     return finish(cart, groups[0], acknowledged_rating, show)

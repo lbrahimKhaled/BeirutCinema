@@ -1,36 +1,77 @@
 # Beirut Cinema Checkout
 
-A three-tool MCP demo for VOX at City Centre Beirut. It reads real showtimes, finds seats that are physically adjacent, and opens VOX’s guest checkout with those seats held. The guest provides their details and pays on VOX.
+An MCP demo for buying seats together at VOX Cinemas in City Centre Beirut. Tell the assistant your date, movie, group size, and earliest time. It checks live VOX availability, holds an adjacent group, and opens the official guest checkout. The customer completes their details and pays there.
 
-| Category | MCP tool | Effect |
+## Tools
+
+| Tool | Category | What it does |
 |---|---|---|
-| Data | `find_showtimes` | Lists live showtimes. Given a specific showtime, previews adjacent seat groups and its admission conditions. |
-| Action | `select_seats` | Requests a hold for a specific adjacent group in the selected showing. |
-| Orchestration | `prepare_checkout` | Searches matching showtimes, chooses the earliest one with enough adjacent seats, and prepares its checkout. |
+| `find_showtimes(day, movie, experience, showtime_id, party_size)` | Data | Reads showtimes for City Centre Beirut. With a showtime ID, it previews adjacent seat groups and reads VOX’s admission conditions. |
+| `select_seats(day, showtime_id, seats, acknowledged_rating, experience)` | Action | Rechecks the exact seat group the customer selected and requests a temporary hold in VOX. |
+| `prepare_checkout(day, movie, party_size, acknowledged_rating, after, experience)` | Orchestration | Searches for a matching show, ranks contiguous seat groups, and prepares checkout for the earliest suitable screening. |
 
-Automatic selection prefers standard seats in the middle of a row. Blank spaces, inaccessible seats, sold seats, and rows are never crossed to build a group. The site decides whether a group can be held. If the first group fails because availability changed, orchestration checks other matching shows.
+Tool results include the movie, local start time, selected seats, basket total when VOX supplies it, and checkout stage. A live checkout is a temporary hold. VOX confirms the tickets after payment.
 
-## Run
+## Architecture
 
-Install Google Chrome and use Python 3.11+. The launcher installs the project dependencies into its own virtual environment.
+```text
+Customer
+  └─ Terminal host (client.py or agent_client.py)
+       ├─ MCP client over stdio → FastMCP server (server.py)
+       │                             └─ VOX showtimes and guest forms (vox.py)
+       └─ Isolated Chrome window → VOX guest checkout
+```
+
+The natural-language host uses the OpenAI Agents SDK. The same MCP server also works with the menu-driven launcher. The hosts display the tool category when each call runs. After VOX accepts a seat hold, the host transfers only the temporary guest session to a fresh Chrome window so checkout has the correct basket.
+
+## Setup and run
+
+Use Python 3.11 or later and Google Chrome. The launcher creates a virtual environment and installs the Python dependencies.
 
 ```bash
 ./start_demo.sh
 ```
 
-Enter a date, movie preference, party size, and earliest time. Leave the movie blank to let the demo choose the earliest title it finds. Review the admission conditions and authorize the temporary seat hold. The demo prints the selected seats and available basket total, then opens the relevant guest checkout in an isolated Chrome window. Finish the checkout in that window and leave the terminal open until you’re done.
+Provide a date, movie or permission to pick, group size, earliest time, and format. Review the admission requirements and approve the hold in the terminal. Keep the terminal open while you finish in Chrome.
 
-The checkout belongs to the guest session, so use the opened browser window. VOX shows the checkout timer and confirms tickets after payment.
+| Command | Use it to |
+|---|---|
+| `./start_demo.sh tools` | List the three MCP tools. |
+| `./start_demo.sh find --movie "Movie Title"` | Read showtimes with no seat hold. Add `--date YYYY-MM-DD` to select a date. |
+| `./start_demo.sh manual` | Choose a showing and an exact group to demonstrate Action. |
+| `./start_demo.sh` | Let Orchestration pick a showing and seats for you. |
+| `./start_demo.sh chat` | Use a natural-language MCP agent. |
 
-- `./start_demo.sh tools` lists exactly three tools.
-- `./start_demo.sh find` reads live showtimes for tomorrow without holding seats.
-- `./start_demo.sh manual` lets you choose the exact showing and seat group before calling the Action tool.
-- `./start_demo.sh` runs the Orchestration flow.
+For chat, copy `.env.example` to `.env`, set `MODEL` and the matching provider API key, and run the chat command. The first chat launch installs the additional SDK dependencies. The terminal modes work without a model key.
 
-## Demo talking points
+## Failure handling
 
-Start with `tools`, then run `find` to show the difference between reading provider inventory and holding it. Use `manual` to show the Action tool by selecting a group. Use the default launcher to demonstrate how the Orchestration tool combines live search, seat selection, and the same VOX hold operation. Show the resulting VOX checkout and timer. Complete payment only for tickets you intend to purchase.
+| Situation | What happens |
+|---|---|
+| No showtimes match the date, movie, or format | Data returns an empty list so the customer can revise the search. |
+| The selected seats are taken, separated by an aisle, or in different areas | The exact-seat request returns `unavailable`. |
+| Orchestration encounters a sold-out or unavailable showing | It checks up to four matching showtimes and returns `unavailable` if it finds no group. |
+| The admission conditions changed or the customer declines the hold | The hold request stops before submitting seats. |
+| VOX checkout is temporarily unavailable | The tool reports the provider problem. If Chrome cannot launch, the host attempts to release the unpaid hold. |
 
-This project communicates with VOX’s public website. The cinema may change its checkout controls and availability.
+## Verification
 
-[VOX showtimes](https://lbn.voxcinemas.com/showtimes) · [VOX booking FAQ](https://lbn.voxcinemas.com/faq)
+Run the offline tests after starting the launcher once.
+
+```bash
+.venv/bin/python -m unittest -v
+```
+
+To verify the live round trip, run the following from an interactive desktop. It exercises all three tools, opens the Action and Orchestration checkouts separately in Chrome, and releases both temporary holds.
+
+```bash
+.venv/bin/python verify_live.py --hold-and-release
+```
+
+VOX inventory is live. Verification requires a current showing with an adjacent pair. The test stops at guest checkout before customer details and payment.
+
+## Presentation
+
+The [5–7 minute screencast script](docs/SCREENCAST.md) includes spoken lines, prompts, and recording cues.
+
+[Official VOX showtimes](https://lbn.voxcinemas.com/showtimes) · [VOX Lebanon booking FAQ](https://lbn.voxcinemas.com/faq)

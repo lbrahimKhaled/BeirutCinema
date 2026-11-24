@@ -52,6 +52,7 @@ class Cart:
     rating: str
     admission: str
     rows: list[list[Seat | None]]
+    abandon_url: str | None
     kept: bool = False
 
 
@@ -118,7 +119,12 @@ def settle(session, response):
         if not poll:
             return response
         for _ in range(6):
-            status = request(session, "GET", poll[1]).json()["data"]
+            try:
+                status = request(session, "GET", poll[1]).json()["data"]
+                if not isinstance(status, dict):
+                    raise TypeError
+            except (ValueError, KeyError, TypeError):
+                raise VoxError("VOX returned an unexpected checkout status.") from None
             if status.get("error"):
                 raise VoxError(f"VOX could not prepare the cart: {str(status['error'])[:200]}")
             if next_page := status.get("url"):
@@ -179,14 +185,16 @@ def guest_cart(show_id: str):
         abandon = None
         cart = None
         try:
-            page = soup(request(session, "GET", "/booking/" + show_id))
+            initial = settle(session, request(session, "GET", "/booking/" + show_id))
+            page = soup(initial)
             cancel = page.select_one('a[href*="/abandon?"]')
             abandon = cancel["href"] if cancel else None
             guest = page.find("a", string=lambda text: text and text.strip() == "Continue as Guest")
-            if not guest:
-                raise VoxError("VOX did not open guest checkout for this showtime.")
-            response = settle(session, request(session, "GET", guest["href"]))
+            # VOX sometimes opens the anonymous seating step directly.
+            response = settle(session, request(session, "GET", guest["href"])) if guest else initial
             page = soup(response)
+            if not abandon and (cancel := page.select_one('a[href*="/abandon?"]')):
+                abandon = cancel["href"]
             form = page.select_one("form#seat-selection[action]")
             if not form:
                 raise SeatUnavailable("VOX did not publish a selectable seat map for this showtime.")
@@ -195,7 +203,8 @@ def guest_cart(show_id: str):
             ratings_text = ratings.get_text(strip=True) if ratings else "See VOX"
             rules_text = " ".join(paragraph.get_text(" ", strip=True)
                                   for paragraph in rules.select("p") if not paragraph.select("a")) if rules else ""
-            cart = Cart(session, page, response.url, form, ratings_text, rules_text, parse_rows(form))
+            cart = Cart(session, page, response.url, form, ratings_text, rules_text,
+                        parse_rows(form), url(abandon) if abandon else None)
             yield cart
         finally:
             if abandon and not (cart and cart.kept):
@@ -236,3 +245,18 @@ def checkout_cookies(cart: Cart) -> list[dict]:
         and (cookie.name in {"JSESSIONID", "AWSALB", "AWSALBCORS"}
              or cookie.name.startswith("vox_pes_"))
     ]
+
+
+def abandon_handoff(handoff: dict) -> bool:
+    """Release the app's unpaid test cart or a cart whose browser could not start."""
+    if not handoff.get("abandon_url"):
+        return False
+    with requests.Session() as session:
+        for cookie in handoff["cookies"]:
+            session.cookies.set(cookie["name"], cookie["value"], domain=cookie["domain"],
+                                path=cookie["path"], secure=cookie["secure"])
+        try:
+            request(session, "GET", handoff["abandon_url"])
+        except (requests.RequestException, VoxError):
+            return False
+    return True

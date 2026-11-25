@@ -19,20 +19,20 @@ Customer
   └─ Terminal host (client.py or agent_client.py)
        ├─ MCP client over stdio → FastMCP server (server.py)
        │                             └─ VOX showtimes and guest forms (vox.py)
-       └─ Isolated Chrome window → VOX guest checkout
+       └─ Default browser or isolated Chrome → VOX checkout
 ```
 
-The natural-language host uses the OpenAI Agents SDK. The same MCP server also works with the menu-driven launcher. The hosts display the tool category when each call runs. After VOX accepts a seat hold, the host transfers only the temporary guest session to a fresh Chrome window so checkout has the correct basket.
+The natural-language host uses the OpenAI Agents SDK. The same MCP server also works with the menu-driven launcher. The hosts display the tool category when each call runs. After VOX accepts a seat hold, the host prints the checkout link and opens it in the default browser. If VOX cannot find the basket there, the host can open an isolated Chrome window with the temporary guest session.
 
 ## Setup and run
 
-Use Python 3.11 or later and Google Chrome. The launcher creates a virtual environment and installs the Python dependencies.
+Use Python 3.11 or later and a default browser. Google Chrome is required for the isolated guest fallback and live verification. The launcher creates a virtual environment and installs the Python dependencies.
 
 ```bash
 ./start_demo.sh
 ```
 
-Provide a date, movie or permission to pick, group size, earliest time, and format. Review the admission requirements and approve the hold in the terminal. Keep the terminal open while you finish in Chrome. To view or change the seats, use **Edit** next to **Choose Seats** in VOX. The new choice stays in the same temporary basket. Dismiss VOX’s cookie notice if it covers **Confirm Seats**.
+Provide a date, movie or permission to pick, group size, earliest time, and format. Review the admission requirements and approve the hold in the terminal. The checkout opens in your regular browser. You can also copy the printed link and paste it into a browser where you are already signed in to VOX. If VOX cannot find the basket there, close that tab and type `g` in the terminal for the isolated guest window. Keep the terminal open until you finish checkout. To view or change the seats, use **Edit** next to **Choose Seats** in VOX. The new choice stays in the same temporary basket. Dismiss VOX’s cookie notice if it covers **Confirm Seats**.
 
 | Command | Use it to |
 |---|---|
@@ -52,7 +52,7 @@ For chat, copy `.env.example` to `.env`, set `MODEL` and the matching provider A
 | The selected seats are taken, separated by an aisle, or in different areas | The exact-seat request returns `unavailable`. |
 | Orchestration encounters a sold-out or unavailable showing | It checks up to four matching showtimes and returns `unavailable` if it finds no group. |
 | The admission conditions changed or the customer declines the hold | The hold request stops before submitting seats. |
-| VOX checkout is temporarily unavailable | The tool reports the provider problem. If Chrome cannot launch, the host attempts to release the unpaid hold. |
+| VOX checkout is temporarily unavailable | The tool reports the provider problem. If your browser cannot find the basket, try the guest fallback while the hold is active. |
 
 ## Verification
 

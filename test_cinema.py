@@ -281,3 +281,39 @@ class ShowtimeFormatTest(unittest.IsolatedAsyncioTestCase):
                 "acknowledged_rating": "PG13",
             })
         self.assertEqual(call.await_args.args[1]["experience"], "IMAX")
+
+
+class CheckoutBrowserTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.handoff = {"url": vox.BASE + "/booking/example/details#details", "cookies": []}
+        self.enterContext(patch("client.read_handoff", return_value=self.handoff))
+        self.launch = self.enterContext(patch("client.webbrowser.open", return_value=True))
+        self.guest = self.enterContext(patch("client.open_guest_checkout", new_callable=AsyncMock))
+        self.output = self.enterContext(patch("builtins.print"))
+
+    async def test_uses_default_browser_and_also_prints_the_exact_link(self):
+        from client import open_checkout
+
+        with patch("builtins.input", return_value=""):
+            await open_checkout("/tmp", {})
+        self.launch.assert_called_once_with(self.handoff["url"], new=2)
+        self.output.assert_any_call("VOX checkout link", self.handoff["url"], sep="\n", flush=True)
+        self.guest.assert_not_awaited()
+
+    async def test_keeps_copyable_link_when_the_browser_cannot_launch(self):
+        from client import open_checkout
+
+        self.launch.side_effect = OSError("browser unavailable")
+        with patch("builtins.input", side_effect=EOFError):
+            await open_checkout("/tmp", {})
+        self.output.assert_any_call("VOX checkout link", self.handoff["url"], sep="\n", flush=True)
+        self.output.assert_any_call("Paste the link above into your regular browser.")
+        self.guest.assert_not_awaited()
+
+    async def test_guest_fallback_reuses_the_existing_basket(self):
+        from client import open_checkout
+
+        with patch("builtins.input", return_value="g"):
+            await open_checkout("/tmp", {})
+        self.launch.assert_called_once_with(self.handoff["url"], new=2)
+        self.guest.assert_awaited_once_with(self.handoff)

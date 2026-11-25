@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import webbrowser
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -105,12 +106,36 @@ async def use_checkout_seat_editor(page, checkout_url):
 
 async def open_checkout(directory, result):
     handoff = read_handoff(directory, result)
+    checkout_url = handoff["url"]
+    print("VOX checkout link", checkout_url, sep="\n", flush=True)
+    try:
+        opened = await asyncio.to_thread(webbrowser.open, checkout_url, new=2)
+    except (OSError, webbrowser.Error):
+        opened = False
+    if opened:
+        print("Opened VOX checkout in your default browser.")
+    else:
+        print("Paste the link above into your regular browser.")
+
+    try:
+        choice = await asyncio.to_thread(
+            input,
+            "If VOX can't find the basket, close that tab and type g for the guest window. "
+            "Press Enter when finished. ",
+        )
+    except EOFError:
+        return
+    if choice.strip().casefold() == "g":
+        await open_guest_checkout(handoff)
+
+
+async def open_guest_checkout(handoff):
     async with async_playwright() as playwright:
         try:
             browser = await launch_checkout_browser(playwright)
         except Error:
-            await asyncio.to_thread(vox.abandon_handoff, handoff)
-            raise ValueError("Chrome could not start. Install Google Chrome and try again.") from None
+            raise ValueError("The guest window could not start. Use the checkout link in your regular browser "
+                             "or install Google Chrome for the guest fallback.") from None
         try:
             context = await browser.new_context()
             await context.add_cookies(handoff["cookies"])

@@ -30,7 +30,7 @@ If recording the chat mode, add this line.
 In chat, say or type:
 
 ```text
-What Standard showtimes are available for [live movie] on [date] after [time]?
+What showtimes are available for [live movie] on [date] after [time]? Include the formats.
 Please preview seats together for two at [returned showtime]. I’m just checking availability.
 ```
 
@@ -57,7 +57,7 @@ Point to the browser step and basket. Close it before starting the next example.
 Use a different real time. In chat, say or type:
 
 ```text
-Pick a Standard showing for [live movie] on [date] after [time].
+Pick a [returned format] showing for [live movie] on [date] after [time].
 We need three seats together. Choose the seats for me and prepare checkout.
 ```
 

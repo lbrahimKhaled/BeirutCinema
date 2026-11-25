@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from time import sleep
+from unicodedata import normalize
 from urllib.parse import urljoin, urlsplit
 from zoneinfo import ZoneInfo
 
@@ -75,11 +76,22 @@ def request(session, method, path, **kwargs):
     return response
 
 
+def search_text(value: str) -> str:
+    return " ".join(re.findall(r"\w+", normalize("NFKC", value).casefold()))
+
+
+def format_filter(value: str) -> str:
+    query = value.strip().casefold()
+    return "" if query in {"any", "all", "all formats"} else query
+
+
 def showtimes(day: date, movie: str, experience: str) -> list[Screening]:
     with requests.Session() as session:
         response = request(session, "GET", "/showtimes", params={"d": day.strftime("%Y%m%d")})
     page = soup(response)
     now = datetime.now(ZONE)
+    movie_query = search_text(movie)
+    format_query = format_filter(experience)
     films = []
     for article in page.select("article.movie-compare"):
         title = article.select_one(".movie-hero h2")
@@ -88,14 +100,14 @@ def showtimes(day: date, movie: str, experience: str) -> list[Screening]:
         if not title or not cinema or cinema.get_text(strip=True) != "City Centre Beirut":
             continue
         name = title.get_text(" ", strip=True)
-        if movie.casefold() not in name.casefold():
+        if movie_query not in search_text(name):
             continue
         for category in article.select(".dates ol.showtimes > li"):
             label = category.select_one("strong")
             if not label:
                 continue
             format_name = label.get_text(" ", strip=True)
-            if experience and format_name.casefold() != experience.casefold():
+            if format_query and format_name.casefold() != format_query:
                 continue
             for link in category.select("a.showtime[data-id]:not(.disabled)"):
                 show_id = link["data-id"]

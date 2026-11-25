@@ -43,9 +43,12 @@ def as_tool_error(error):
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
-def find_showtimes(day: date, movie: str = "", experience: str = "Standard",
+def find_showtimes(day: date, movie: str = "", experience: str = "",
                    showtime_id: str | None = None, party_size: PartySize = 2) -> Options:
-    """Read City Centre Beirut showtimes. With a showtime ID, preview seats together and admission rules."""
+    """Read live City Centre Beirut showtimes in all formats unless experience is supplied.
+
+    With a showtime ID, preview seats together and admission rules.
+    """
     if day < datetime.now(vox.ZONE).date():
         raise ToolError("Choose today or a future date in Beirut.")
     try:
@@ -85,7 +88,7 @@ def finish(cart, group, rating, screening):
 
 @mcp.tool(annotations={"readOnlyHint": False, "idempotentHint": False})
 def select_seats(day: date, showtime_id: str, seats: SeatLabels,
-                 acknowledged_rating: str, experience: str = "Standard") -> Checkout:
+                 acknowledged_rating: str, experience: str = "") -> Checkout:
     """Temporarily hold an exact adjacent seat group and prepare guest checkout after rating acknowledgement."""
     options = find_showtimes(day, experience=experience)
     screening = next((item for item in options.screenings if item.id == showtime_id), None)
@@ -102,7 +105,7 @@ def select_seats(day: date, showtime_id: str, seats: SeatLabels,
 
 @mcp.tool(annotations={"readOnlyHint": False, "idempotentHint": False})
 def prepare_checkout(day: date, movie: str, party_size: PartySize, acknowledged_rating: str,
-                     after: time = time(0), experience: str = "Standard") -> Checkout:
+                     after: time = time(0), experience: str = "") -> Checkout:
     """Choose the earliest matching show with adjacent seats and prepare its real guest checkout."""
     options = find_showtimes(day, movie, experience)
     candidates = [show for show in options.screenings

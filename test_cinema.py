@@ -230,3 +230,54 @@ class CheckoutNavigationTest(unittest.IsolatedAsyncioTestCase):
         confirm.assert_called_once()
         route.continue_.assert_not_awaited()
         self.assertEqual(route.fulfill.await_args.kwargs["headers"]["location"], basket + "/details")
+
+
+class ShowtimeFormatTest(unittest.IsolatedAsyncioTestCase):
+    async def test_search_defaults_to_all_formats_and_honors_explicit_filter(self):
+        day = (datetime.now(vox.ZONE).date() + timedelta(days=1)).isoformat()
+        markup = """
+        <article class="movie-compare">
+          <aside class="movie-hero">
+            <h2>The Hunger Games: Sunrise on the Reaping</h2>
+            <span class="classification">PG13</span>
+          </aside>
+          <div class="dates">
+            <h3>City Centre Beirut</h3>
+            <ol class="showtimes">
+              <li><strong>IMAX</strong><a class="showtime" data-id="0008-1">12:55pm</a></li>
+              <li><strong>GOLD</strong><a class="showtime" data-id="0008-2">3:45pm</a></li>
+              <li><strong>4DX</strong><a class="showtime" data-id="0008-3">6:20pm</a></li>
+            </ol>
+          </div>
+        </article>"""
+        arguments = {"day": day, "movie": "Hunger Games Sunrise on the Reaping"}
+        with patch("vox.request", return_value=SimpleNamespace(text=markup)):
+            async with Client(server.mcp) as client:
+                all_formats = await client.call_tool("find_showtimes", arguments)
+                standard = await client.call_tool("find_showtimes", {**arguments, "experience": "Standard"})
+                imax = await client.call_tool("find_showtimes", {**arguments, "experience": "imax"})
+        self.assertEqual([item["experience"] for item in all_formats.structured_content["screenings"]],
+                         ["IMAX", "GOLD", "4DX"])
+        self.assertEqual(standard.structured_content["screenings"], [])
+        self.assertEqual([item["id"] for item in imax.structured_content["screenings"]], ["0008-1"])
+
+    async def test_agent_passes_the_previewed_format_for_the_hold(self):
+        try:
+            from agent_client import CinemaServer, MCPServerStdio
+        except ImportError:
+            self.skipTest("Install requirements-agent.txt to test the chat host.")
+        host = CinemaServer("/tmp")
+        title = "The Hunger Games: Sunrise on the Reaping"
+        host.previews["0008-1"] = {
+            "show": {"movie": title}, "day": "2026-11-25", "experience": "IMAX",
+            "rating": "PG13", "admission": "",
+        }
+        with patch("builtins.input", return_value="y"), patch.object(
+            MCPServerStdio, "call_tool", new_callable=AsyncMock,
+            return_value=SimpleNamespace(structured_content={"status": "unavailable"}),
+        ) as call:
+            await host.call_tool("prepare_checkout", {
+                "day": "2026-11-25", "movie": title, "party_size": 2,
+                "acknowledged_rating": "PG13",
+            })
+        self.assertEqual(call.await_args.args[1]["experience"], "IMAX")

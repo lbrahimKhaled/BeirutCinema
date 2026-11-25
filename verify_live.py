@@ -53,7 +53,7 @@ async def find_preview(client):
     now = datetime.now(ZONE).date()
     for offset in (0, 1, 2, 3, 4):
         day = (now + timedelta(days=offset)).isoformat()
-        result = await client.call_tool("find_showtimes", {"day": day})
+        result = await client.call_tool("find_showtimes", {"day": day, "experience": "Standard"})
         candidates = result.structured_content["screenings"]
         # Prefer general-admission titles for the temporary test.
         candidates = sorted(candidates, key=lambda item: item["rating"] not in {"G", "PG"})

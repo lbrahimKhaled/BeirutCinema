@@ -10,16 +10,21 @@ from dotenv import load_dotenv
 from mcp.types import CallToolResult, TextContent
 
 from client import CATEGORIES, ROOT, ZONE, open_checkout
+from vox import format_filter, search_text
 
 INSTRUCTIONS = """You help guests choose seats together at VOX City Centre Beirut.
-Today is {today} in Asia/Beirut. Ask for the day, group size, movie or permission to pick,
-and any time or format preference. Default to Standard if the user has no preference.
-Use find_showtimes to return current screenings. For a specific screening call
-find_showtimes again with its showtime_id and party_size to get live seat groups and
-admission conditions. Use select_seats when the guest chooses an exact group. Use
+Today is {today} in Asia/Beirut. Use today for a showtime question without a date.
+When preparing checkout, ask for the day, group size, movie or permission to pick,
+and any time or format preference. Search all formats by default: leave experience
+omitted unless the guest requests a specific format. Include each returned format with
+its showtimes. If a search for one format is empty, report the filter and check other
+formats for the same film before saying there are no options. When a search is empty,
+say no remaining bookable showtimes matched the date and filters.
+For a specific screening, call find_showtimes again with its showtime_id and party_size
+to get live seat groups and admission conditions. Use select_seats when the guest chooses an exact group. Use
 prepare_checkout when the guest asks you to pick a showing and seats for them.
-Before either hold tool, preview that showing with find_showtimes, and pass the
-returned rating. The terminal separately asks the guest to authorize the live hold.
+Before either hold tool, preview that showing with find_showtimes and pass its actual
+format and rating. The terminal separately asks the guest to authorize the live hold.
 If they decline, end the turn. Never state that tickets are purchased. Report the actual
 selected movie, time, seats and basket total when given. The host opens VOX checkout for
 the guest to enter their own details and pay. Do not ask for card or contact details.
@@ -50,14 +55,17 @@ class CinemaServer(MCPServerStdio):
                 return self.decline("A checkout is already prepared for this request.")
             preview = self.previews.get(args.get("showtime_id"))
             if tool_name == "prepare_checkout":
+                movie = search_text(str(args.get("movie", "")))
+                experience = format_filter(str(args.get("experience") or ""))
                 preview = next((item for item in self.previews.values()
-                                if item["show"]["movie"].casefold() == str(args.get("movie", "")).casefold()
+                                if movie == search_text(item["show"]["movie"])
                                 and item["day"] == args.get("day")
-                                and item["experience"].casefold()
-                                == str(args.get("experience", "Standard")).casefold()), None)
+                                and (not experience or item["experience"].casefold() == experience)), None)
             if not preview or preview["rating"] != args.get("acknowledged_rating"):
                 return self.decline("Preview the specific showtime and its admission conditions first.")
-            print(f"{preview['show']['movie']} · {preview['day']} · Rating {preview['rating']}")
+            args = {**args, "experience": preview.get("experience", "")}
+            print(f"{preview['show']['movie']} · {preview['day']} · "
+                  f"{args['experience']} · Rating {preview['rating']}")
             if preview["admission"]:
                 print(preview["admission"])
             if tool_name == "select_seats":
@@ -67,7 +75,7 @@ class CinemaServer(MCPServerStdio):
             if input("Does everyone meet VOX’s admission conditions? Hold seats now? [y/N]: ").strip().lower() != "y":
                 return self.decline("The guest declined the seat hold. End this turn.")
 
-        result = await super().call_tool(tool_name, arguments, meta=meta)
+        result = await super().call_tool(tool_name, args, meta=meta)
         data = result.structured_content or {}
         if tool_name == "find_showtimes":
             shows = data.get("screenings") or []

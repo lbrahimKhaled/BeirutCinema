@@ -143,7 +143,7 @@ async def demo(client, directory, manual):
     earliest = time.fromisoformat(input("Earliest time [00:00]: ").strip() or "00:00")
     if earliest.tzinfo:
         raise ValueError("Enter a local Beirut time as HH:MM.")
-    experience = input("Screening format [Standard]: ").strip() or "Standard"
+    experience = input("Screening format [any]: ").strip()
     criteria = {"day": day.isoformat(), "movie": movie, "experience": experience}
     options = await call(client, "find_showtimes", **criteria)
     screenings = [show for show in options["screenings"]
@@ -175,12 +175,12 @@ async def demo(client, directory, manual):
         labels = choose(details["seats"], "Select a seat group number: ")
         tool = "select_seats"
         args = {"day": day.isoformat(), "showtime_id": show["id"], "seats": labels,
-                "experience": experience}
+                "experience": show["experience"]}
     else:
         tool = "prepare_checkout"
         args = {**criteria, "movie": show["movie"], "party_size": party,
-                "after": earliest.isoformat()}
-    print(f"{show['movie']} is rated {details['rating']}.")
+                "after": earliest.isoformat(), "experience": show["experience"]}
+    print(f"{show['movie']} · {show['experience']} · Rating {details['rating']}")
     if input("Does everyone meet VOX’s admission conditions? Hold seats now? [y/N]: ").strip().lower() != "y":
         return 0
     result = await call(client, tool, **args, acknowledged_rating=details["rating"])
@@ -200,6 +200,7 @@ async def main():
     parser.add_argument("mode", nargs="?", choices=("auto", "manual", "tools", "find", "chat"), default="auto")
     parser.add_argument("--date", default=(datetime.now(ZONE).date() + timedelta(days=1)).isoformat())
     parser.add_argument("--movie", default="")
+    parser.add_argument("--format", default="", help="Showtime format for find, such as IMAX")
     options = parser.parse_args()
     with TemporaryDirectory(prefix="beirut-cinema-") as directory:
         if options.mode == "chat":
@@ -214,7 +215,8 @@ async def main():
                     print(f"{CATEGORIES[tool.name]:14} {tool.name}")
                 return 0
             if options.mode == "find":
-                result = await call(client, "find_showtimes", day=options.date, movie=options.movie)
+                result = await call(client, "find_showtimes", day=options.date,
+                                    movie=options.movie, experience=options.format)
                 if result["screenings"]:
                     show_listing(result["screenings"])
                 else:

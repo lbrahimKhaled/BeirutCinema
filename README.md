@@ -6,7 +6,7 @@ An MCP demo for buying seats together at VOX Cinemas in City Centre Beirut. Tell
 
 | Tool | Category | What it does |
 |---|---|---|
-| `find_showtimes(day, movie, experience, showtime_id, party_size)` | Data | Reads showtimes for City Centre Beirut. With a showtime ID, it previews adjacent seat groups and reads VOX’s admission conditions. |
+| `find_showtimes(day, movie, experience, showtime_id, party_size)` | Data | Reads showtimes in every format for City Centre Beirut by default. With a showtime ID, it previews adjacent seat groups and reads VOX’s admission conditions. |
 | `select_seats(day, showtime_id, seats, acknowledged_rating, experience)` | Action | Rechecks the exact seat group the customer selected and requests a temporary hold in VOX. |
 | `prepare_checkout(day, movie, party_size, acknowledged_rating, after, experience)` | Orchestration | Searches for a matching show, ranks contiguous seat groups, and prepares checkout for the earliest suitable screening. |
 
@@ -37,7 +37,7 @@ Provide a date, movie or permission to pick, group size, earliest time, and form
 | Command | Use it to |
 |---|---|
 | `./start_demo.sh tools` | List the three MCP tools. |
-| `./start_demo.sh find --movie "Movie Title"` | Read showtimes with no seat hold. Add `--date YYYY-MM-DD` to select a date. |
+| `./start_demo.sh find --movie "Movie Title"` | Read showtimes across formats. Add `--date YYYY-MM-DD` for a date or `--format IMAX` to filter. |
 | `./start_demo.sh manual` | Choose a showing and an exact group to demonstrate Action. |
 | `./start_demo.sh` | Let Orchestration pick a showing and seats for you. |
 | `./start_demo.sh chat` | Use a natural-language MCP agent. |

@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent
 ZONE = ZoneInfo("Asia/Beirut")
 CATEGORIES = {"find_showtimes": "Data", "select_seats": "Action",
               "prepare_checkout": "Orchestration"}
+CHECKOUT_STEP_SELECTOR = "#offers.current, #extras.current, #details.current, #payment.current"
 
 
 async def call(client, name, **arguments):
@@ -56,11 +57,57 @@ def read_handoff(directory, result):
     return handoff
 
 
+async def launch_checkout_browser(playwright):
+    # VOX can reset an HTTP/2 stream during checkout navigation. Use HTTPS
+    # over HTTP/1.1 in this separate browser process, including user reloads.
+    return await playwright.chromium.launch(
+        channel="chrome", headless=False, args=["--disable-http2", "--disable-quic"],
+    )
+
+
+async def use_checkout_seat_editor(page, checkout_url):
+    # Keep this basket's seat map and seat confirmation on the same HTTPS
+    # transport as the MCP tool. Details and payment load directly in Chrome.
+    basket = urlsplit(checkout_url).path.rsplit("/", 1)[0]
+    editor = re.compile("^" + re.escape(vox.BASE + basket)
+                        + r"/(?:seats(?:/fetch)?|allocate)(?:[?#].*)?$")
+
+    async def load_editor(route):
+        request = route.request
+        if request.resource_type != "document":
+            await route.continue_()
+            return
+        path = urlsplit(request.url).path
+        if request.method == "GET" and not path.endswith("/allocate"):
+            cookies = await page.context.cookies(request.url)
+            document = await asyncio.to_thread(vox.seat_editor_document, request.url, cookies)
+            if document:
+                body, headers = document
+                await route.fulfill(status=200, headers=headers, body=body)
+                return
+        elif request.method == "POST" and path.endswith("/allocate") and request.post_data:
+            cookies = await page.context.cookies(request.url)
+            target = await asyncio.to_thread(
+                vox.confirm_seat_edit, request.url, cookies, request.post_data,
+            )
+            if not target:
+                print("VOX could not confirm the seat change. Check the basket in Chrome.",
+                      file=sys.stderr)
+            await route.fulfill(
+                status=303,
+                headers={"location": target or checkout_url, "cache-control": "no-store"},
+            )
+            return
+        await route.continue_()
+
+    await page.route(editor, load_editor)
+
+
 async def open_checkout(directory, result):
     handoff = read_handoff(directory, result)
     async with async_playwright() as playwright:
         try:
-            browser = await playwright.chromium.launch(channel="chrome", headless=False)
+            browser = await launch_checkout_browser(playwright)
         except Error:
             await asyncio.to_thread(vox.abandon_handoff, handoff)
             raise ValueError("Chrome could not start. Install Google Chrome and try again.") from None
@@ -68,9 +115,10 @@ async def open_checkout(directory, result):
             context = await browser.new_context()
             await context.add_cookies(handoff["cookies"])
             page = await context.new_page()
+            await use_checkout_seat_editor(page, handoff["url"])
             try:
                 await page.goto(handoff["url"], wait_until="commit", timeout=20000)
-                step = page.locator("#offers.current, #extras.current, #details.current, #payment.current")
+                step = page.locator(CHECKOUT_STEP_SELECTOR)
                 await step.first.wait_for(timeout=25000)
             except Error:
                 print("The guest checkout tab is open. If VOX is still loading, reload that tab.",

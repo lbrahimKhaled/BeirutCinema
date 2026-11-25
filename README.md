@@ -32,7 +32,7 @@ Use Python 3.11 or later and Google Chrome. The launcher creates a virtual envir
 ./start_demo.sh
 ```
 
-Provide a date, movie or permission to pick, group size, earliest time, and format. Review the admission requirements and approve the hold in the terminal. Keep the terminal open while you finish in Chrome.
+Provide a date, movie or permission to pick, group size, earliest time, and format. Review the admission requirements and approve the hold in the terminal. Keep the terminal open while you finish in Chrome. To view or change the seats, use **Edit** next to **Choose Seats** in VOX. The new choice stays in the same temporary basket. Dismiss VOX’s cookie notice if it covers **Confirm Seats**.
 
 | Command | Use it to |
 |---|---|
@@ -62,7 +62,7 @@ Run the offline tests after starting the launcher once.
 .venv/bin/python -m unittest -v
 ```
 
-To verify the live round trip, run the following from an interactive desktop. It exercises all three tools, opens the Action and Orchestration checkouts separately in Chrome, and releases both temporary holds.
+To verify the live round trip, run the following from an interactive desktop. It exercises all three tools, opens both checkouts in Chrome, reloads them, edits the Action seat group, and releases both temporary holds.
 
 ```bash
 .venv/bin/python verify_live.py --hold-and-release

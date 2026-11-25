@@ -234,6 +234,12 @@ def allocate(cart: Cart, group: list[Seat], acknowledged_rating: str):
     return response.url, stage, total.get_text(" ", strip=True) if total else None
 
 
+def is_checkout_cookie(name: str, domain: str) -> bool:
+    return domain.lstrip(".") == "lbn.voxcinemas.com" and (
+        name in {"JSESSIONID", "AWSALB", "AWSALBCORS"} or name.startswith("vox_pes_")
+    )
+
+
 def checkout_cookies(cart: Cart) -> list[dict]:
     """Export only the app's own first-party guest order and affinity cookies."""
     return [
@@ -241,20 +247,63 @@ def checkout_cookies(cart: Cart) -> list[dict]:
          "path": cookie.path, "secure": cookie.secure,
          "httpOnly": cookie.has_nonstandard_attr("HttpOnly")}
         for cookie in cart.session.cookies
-        if cookie.domain.lstrip(".") == "lbn.voxcinemas.com"
-        and (cookie.name in {"JSESSIONID", "AWSALB", "AWSALBCORS"}
-             or cookie.name.startswith("vox_pes_"))
+        if is_checkout_cookie(cookie.name, cookie.domain)
     ]
+
+
+def checkout_session(cookies: list[dict]) -> requests.Session:
+    session = requests.Session()
+    for cookie in cookies:
+        if is_checkout_cookie(cookie["name"], cookie["domain"]):
+            session.cookies.set(cookie["name"], cookie["value"], domain=cookie["domain"],
+                                path=cookie["path"], secure=cookie["secure"])
+    return session
+
+
+def seat_editor_document(address: str, cookies: list[dict]) -> tuple[bytes, dict] | None:
+    """Load VOX's own editable seat map through the app's HTTPS transport."""
+    with checkout_session(cookies) as session:
+        try:
+            response = settle(session, request(session, "GET", address))
+        except (requests.RequestException, VoxError):
+            return None
+    editor_path = urlsplit(address).path.removesuffix("/fetch")
+    if (urlsplit(response.url).path != editor_path
+            or not soup(response).select_one("#seats.current form#seat-selection")):
+        return None
+
+    # requests has decoded the body. Keep VOX's document and security headers,
+    # and leave cookie management with the Chrome guest session.
+    omitted = {"content-encoding", "content-length", "connection", "transfer-encoding",
+               "set-cookie", "alt-svc"}
+    headers = {name: value for name, value in response.headers.items()
+               if name.lower() not in omitted}
+    return response.content, headers
+
+
+def confirm_seat_edit(address: str, cookies: list[dict], form_data: str) -> str | None:
+    """Submit exactly the seat form the guest confirmed, once."""
+    basket = urlsplit(address).path.removesuffix("/allocate")
+    with checkout_session(cookies) as session:
+        try:
+            response = settle(session, request(
+                session, "POST", address, data=form_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded",
+                         "Referer": url(basket + "/seats")},
+            ))
+        except (requests.RequestException, VoxError):
+            return None
+    if urlsplit(response.url).path in {basket + "/" + step
+                                       for step in ("seats", "offers", "extras", "details", "payment")}:
+        return response.url
+    return None
 
 
 def abandon_handoff(handoff: dict) -> bool:
     """Release the app's unpaid test cart or a cart whose browser could not start."""
     if not handoff.get("abandon_url"):
         return False
-    with requests.Session() as session:
-        for cookie in handoff["cookies"]:
-            session.cookies.set(cookie["name"], cookie["value"], domain=cookie["domain"],
-                                path=cookie["path"], secure=cookie["secure"])
+    with checkout_session(handoff["cookies"]) as session:
         try:
             request(session, "GET", handoff["abandon_url"])
         except (requests.RequestException, VoxError):

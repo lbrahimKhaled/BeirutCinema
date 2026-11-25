@@ -1,7 +1,8 @@
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from bs4 import BeautifulSoup
 from fastmcp import Client
@@ -150,3 +151,82 @@ class AgentGuardTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_error)
         self.assertIn("declined", result.content[0].text)
         self.assertIsNone(self.host.checkout)
+
+
+class CheckoutNavigationTest(unittest.IsolatedAsyncioTestCase):
+    def test_status_request_keeps_only_guest_checkout_cookies(self):
+        origin = "lbn.voxcinemas.com"
+        cookies = [
+            {"name": name, "domain": domain, "value": "test", "path": "/", "secure": True}
+            for name, domain in [("JSESSIONID", origin), ("vox_pes_test", origin),
+                                 ("tracking", origin), ("JSESSIONID", "example.org")]
+        ]
+        with vox.checkout_session(cookies) as session:
+            self.assertEqual({(cookie.name, cookie.domain) for cookie in session.cookies},
+                             {("JSESSIONID", origin), ("vox_pes_test", origin)})
+
+    async def test_editor_transport_is_scoped_to_this_basket_and_get_requests(self):
+        from client import use_checkout_seat_editor
+
+        page = SimpleNamespace(route=AsyncMock())
+        await use_checkout_seat_editor(page, vox.BASE + "/booking/current/details#details")
+        matcher, handle = page.route.await_args.args
+        self.assertTrue(matcher.fullmatch(vox.BASE + "/booking/current/seats"))
+        self.assertTrue(matcher.fullmatch(vox.BASE + "/booking/current/seats/fetch#seats"))
+        self.assertFalse(matcher.fullmatch(vox.BASE + "/booking/other/seats"))
+        self.assertFalse(matcher.fullmatch(vox.BASE + "/booking/current/payment"))
+        route = SimpleNamespace(
+            request=SimpleNamespace(method="POST", resource_type="document", url=vox.BASE + "/booking/current/seats"),
+            continue_=AsyncMock(), fulfill=AsyncMock(),
+        )
+        await handle(route)
+        route.continue_.assert_awaited_once()
+        route.fulfill.assert_not_awaited()
+
+    async def test_confirming_seats_submits_once_through_the_existing_basket(self):
+        from client import use_checkout_seat_editor
+
+        page = SimpleNamespace(route=AsyncMock(), context=SimpleNamespace(
+            cookies=AsyncMock(return_value=[]),
+        ))
+        basket = vox.BASE + "/booking/current"
+        await use_checkout_seat_editor(page, basket + "/details")
+        matcher, handle = page.route.await_args.args
+        self.assertTrue(matcher.fullmatch(basket + "/allocate"))
+        form_data = "_csrf=test&seat=seat-1&seat=seat-2"
+        route = SimpleNamespace(
+            request=SimpleNamespace(method="POST", resource_type="document",
+                                    url=basket + "/allocate", post_data=form_data),
+            continue_=AsyncMock(), fulfill=AsyncMock(),
+        )
+        with patch("vox.confirm_seat_edit", return_value=basket + "/details") as confirm:
+            await handle(route)
+        confirm.assert_called_once_with(basket + "/allocate", [], form_data)
+        route.continue_.assert_not_awaited()
+        self.assertEqual(route.fulfill.await_args.kwargs["status"], 303)
+
+    def test_seat_edit_rejects_a_response_for_a_different_basket(self):
+        origin = vox.BASE + "/booking/current"
+        response = SimpleNamespace(url=vox.BASE + "/booking/other/details")
+        with patch("vox.request", return_value=response), patch("vox.settle", return_value=response):
+            self.assertIsNone(vox.confirm_seat_edit(origin + "/allocate", [], "seat=seat-1"))
+
+    async def test_uncertain_seat_submission_returns_to_checkout_without_retrying(self):
+        from client import use_checkout_seat_editor
+
+        page = SimpleNamespace(route=AsyncMock(), context=SimpleNamespace(
+            cookies=AsyncMock(return_value=[]),
+        ))
+        basket = vox.BASE + "/booking/current"
+        await use_checkout_seat_editor(page, basket + "/details")
+        _, handle = page.route.await_args.args
+        route = SimpleNamespace(
+            request=SimpleNamespace(method="POST", resource_type="document",
+                                    url=basket + "/allocate", post_data="seat=seat-1"),
+            continue_=AsyncMock(), fulfill=AsyncMock(),
+        )
+        with patch("vox.confirm_seat_edit", return_value=None) as confirm:
+            await handle(route)
+        confirm.assert_called_once()
+        route.continue_.assert_not_awaited()
+        self.assertEqual(route.fulfill.await_args.kwargs["headers"]["location"], basket + "/details")

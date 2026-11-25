@@ -70,8 +70,4 @@ To verify the live round trip, run the following from an interactive desktop. It
 
 VOX inventory is live. Verification requires a current showing with an adjacent pair. The test stops at guest checkout before customer details and payment.
 
-## Presentation
-
-The [5–7 minute screencast script](docs/SCREENCAST.md) includes spoken lines, prompts, and recording cues.
-
 [Official VOX showtimes](https://lbn.voxcinemas.com/showtimes) · [VOX Lebanon booking FAQ](https://lbn.voxcinemas.com/faq)
